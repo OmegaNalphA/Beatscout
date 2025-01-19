@@ -1,0 +1,269 @@
+# BeatScout - Real-time Music Analysis Tool
+
+## Phase 1 Instructions
+
+## Project Overview
+
+BeatScout is a web-based application designed for DJs and music enthusiasts to analyze live music in various settings (clubs, venues, etc.). It uses the microphone to capture ambient music and provides real-time analysis of:
+
+1. Audio waveform visualization
+2. BPM (beats per minute) detection
+3. Musical key detection
+
+This tool helps DJs quickly understand the characteristics of tracks being played in their environment, making it easier to plan transitions and track selection. The project will be built in phases, with each phase adding new functionality.
+
+## Current Phase: Phase 1 - Basic Setup and Structure
+
+In this first phase, we will create the foundational structure of BeatScout and implement basic microphone access. Future phases will add waveform visualization, BPM detection, and key analysis.
+
+### Instructions for Phase 1:
+
+1. Create a new web project in Replit with the following structure:
+
+```
+/
+├── index.html
+├── styles.css
+├── scripts/
+    └── main.js
+
+```
+
+1. Copy the following code into each file:
+
+### index.html
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Audio BPM & Key Analyzer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <div class="section waveform-section">
+            <canvas id="waveformCanvas"></canvas>
+        </div>
+
+        <div class="section bpm-section">
+            <h2>BPM</h2>
+            <div id="bpmDisplay">--</div>
+        </div>
+
+        <div class="section key-section">
+            <h2>Key</h2>
+            <div id="keyDisplay">--</div>
+        </div>
+
+        <div class="controls">
+            <button id="startButton">Start</button>
+            <div id="statusMessage">Click Start to begin analysis</div>
+        </div>
+    </div>
+    <script src="scripts/main.js"></script>
+</body>
+</html>
+
+```
+
+### styles.css
+
+```css
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background-color: #1a1a1a;
+    color: #ffffff;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.container {
+    width: 90%;
+    max-width: 600px;
+    background-color: #2a2a2a;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.section {
+    margin-bottom: 20px;
+    padding: 15px;
+    background-color: #333;
+    border-radius: 8px;
+}
+
+.waveform-section {
+    height: 200px;
+}
+
+#waveformCanvas {
+    width: 100%;
+    height: 100%;
+    background-color: #222;
+    border-radius: 4px;
+}
+
+.bpm-section, .key-section {
+    text-align: center;
+}
+
+#bpmDisplay, #keyDisplay {
+    font-size: 2.5rem;
+    font-weight: bold;
+    margin: 10px 0;
+}
+
+.controls {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+}
+
+#startButton {
+    padding: 10px 20px;
+    font-size: 1.1rem;
+    background-color: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background-color 0.3s;
+}
+
+#startButton:hover {
+    background-color: #45a049;
+}
+
+#statusMessage {
+    color: #888;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+```
+
+### scripts/main.js
+
+```jsx
+class AudioAnalyzer {
+    constructor() {
+        this.audioContext = null;
+        this.analyserNode = null;
+        this.mediaStream = null;
+        this.isInitialized = false;
+
+        // DOM elements
+        this.startButton = document.getElementById('startButton');
+        this.statusMessage = document.getElementById('statusMessage');
+
+        // Bind methods
+        this.toggleAudio = this.toggleAudio.bind(this);
+
+        // Event listeners
+        this.startButton.addEventListener('click', this.toggleAudio);
+    }
+
+    async initializeAudio() {
+        try {
+            // Request microphone access
+            this.mediaStream = await navigator.mediaDevices.getUserMedia({
+                audio: {
+                    echoCancellation: false,
+                    autoGainControl: false,
+                    noiseSuppression: false
+                }
+            });
+
+            // Create audio context and nodes
+            this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
+            this.analyserNode = this.audioContext.createAnalyser();
+
+            // Connect nodes
+            sourceNode.connect(this.analyserNode);
+
+            this.isInitialized = true;
+            this.updateStatus('Audio initialized successfully');
+        } catch (error) {
+            this.updateStatus(`Error: ${error.message}`);
+            console.error('Audio initialization error:', error);
+        }
+    }
+
+    async toggleAudio() {
+        if (!this.isInitialized) {
+            this.startButton.disabled = true;
+            await this.initializeAudio();
+            this.startButton.disabled = false;
+            this.startButton.textContent = 'Stop';
+        } else {
+            this.stopAudio();
+            this.startButton.textContent = 'Start';
+        }
+    }
+
+    stopAudio() {
+        if (this.mediaStream) {
+            this.mediaStream.getTracks().forEach(track => track.stop());
+            this.mediaStream = null;
+        }
+        if (this.audioContext) {
+            this.audioContext.close();
+            this.audioContext = null;
+        }
+        this.isInitialized = false;
+        this.updateStatus('Audio stopped');
+    }
+
+    updateStatus(message) {
+        this.statusMessage.textContent = message;
+    }
+}
+
+// Initialize when the page loads
+window.addEventListener('load', () => {
+    new AudioAnalyzer();
+});
+
+```
+
+1. After creating these files, please:
+    - Verify the project structure is correct
+    - Make sure all files are properly linked
+    - Test that the application loads without any console errors
+2. Expected functionality for this phase:
+    - The page should display with a dark theme (suitable for club/venue environments)
+    - There should be three main sections (waveform, BPM, and key)
+    - The Start button should request microphone access when clicked
+    - Status messages should update appropriately
+3. Please test the following and report any issues:
+    - Does the page load correctly?
+    - Does the Start button trigger the microphone permission prompt?
+    - Does the status message update appropriately?
+    - Does the Stop functionality work correctly?
+    - Is the interface readable in low-light conditions?
+4. If everything is working correctly, we can proceed to Phase 2 (Waveform Visualization).
+
+### Important Notes:
+
+- We are using vanilla JavaScript - no additional libraries are needed for this phase
+- The audio initialization is set up to work best with Chrome/Chromium-based browsers
+- Error handling is important - make sure all error messages are displayed to the user
+- The UI should be responsive and work on different screen sizes
+- The interface should be easily readable in dark environments
+- The layout should work well on mobile devices for easy use in venues
+
+Would you like me to proceed with Phase 2 after you've confirmed Phase 1 is working correctly?
