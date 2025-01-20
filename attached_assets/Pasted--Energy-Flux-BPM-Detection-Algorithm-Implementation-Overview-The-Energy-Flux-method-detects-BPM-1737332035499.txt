@@ -1,0 +1,244 @@
+# Energy Flux BPM Detection Algorithm Implementation
+
+## Overview
+The Energy Flux method detects BPM by analyzing changes in energy across different frequency bands, with special attention to the frequencies where beats typically occur in dance music. This method is particularly effective for:
+- Electronic and dance music with strong beats
+- Environments with background noise
+- Real-time analysis
+
+## Algorithm Details
+
+### 1. Frequency Band Setup
+```javascript
+class BPMAnalyzer {
+    constructor(audioContext, analyserNode) {
+        this.analyser = analyserNode;
+        this.analyser.fftSize = 2048; // For detailed frequency analysis
+        
+        // Define frequency bands (in Hz) important for beat detection
+        this.frequencyBands = [
+            { start: 20, end: 60 },    // Sub-bass (kick drums)
+            { start: 60, end: 200 },   // Bass (strong beats)
+            { start: 200, end: 800 },  // Low mids (snares/claps)
+            { start: 800, end: 2000 }  // Mids (percussion)
+        ];
+        
+        // Storage for energy history
+        this.energyHistory = new Array(4).fill([]).map(() => []);
+        this.fluxHistory = [];
+        this.bpmHistory = [];
+        
+        // Analysis parameters
+        this.maxHistoryLength = 88200; // About 2 seconds at 44.1kHz
+        this.minBPM = 70;  // Minimum detectable BPM
+        this.maxBPM = 180; // Maximum detectable BPM
+    }
+}
+```
+
+### 2. Energy Calculation
+```javascript
+calculateEnergy(frequencyData, bandStart, bandEnd) {
+    // Convert frequency range to FFT bin indices
+    const binStart = Math.floor(bandStart * this.fftSize / this.audioContext.sampleRate);
+    const binEnd = Math.floor(bandEnd * this.fftSize / this.audioContext.sampleRate);
+    
+    let energy = 0;
+    // Sum squared magnitudes for the frequency band
+    for (let i = binStart; i < binEnd; i++) {
+        energy += Math.pow(frequencyData[i], 2);
+    }
+    return energy;
+}
+
+updateEnergyHistory() {
+    const frequencyData = new Uint8Array(this.analyser.frequencyBinCount);
+    this.analyser.getByteFrequencyData(frequencyData);
+    
+    // Calculate energy for each frequency band
+    this.frequencyBands.forEach((band, index) => {
+        const energy = this.calculateEnergy(frequencyData, band.start, band.end);
+        this.energyHistory[index].push(energy);
+        
+        // Keep history length manageable
+        if (this.energyHistory[index].length > this.maxHistoryLength) {
+            this.energyHistory[index].shift();
+        }
+    });
+}
+```
+
+### 3. Flux Calculation
+```javascript
+calculateFlux() {
+    // Calculate changes in energy (flux) across all bands
+    let totalFlux = 0;
+    
+    this.frequencyBands.forEach((band, index) => {
+        if (this.energyHistory[index].length < 2) return;
+        
+        // Calculate difference in energy from previous sample
+        const currentEnergy = this.energyHistory[index][this.energyHistory[index].length - 1];
+        const previousEnergy = this.energyHistory[index][this.energyHistory[index].length - 2];
+        
+        // Only consider positive changes (increases in energy)
+        const flux = Math.max(0, currentEnergy - previousEnergy);
+        
+        // Weight the bands differently (bass frequencies matter more for beats)
+        const weight = index === 0 ? 2.0 : // Sub-bass
+                      index === 1 ? 1.5 : // Bass
+                      1.0;                // Others
+        
+        totalFlux += flux * weight;
+    });
+    
+    this.fluxHistory.push(totalFlux);
+    if (this.fluxHistory.length > this.maxHistoryLength) {
+        this.fluxHistory.shift();
+    }
+    
+    return totalFlux;
+}
+```
+
+### 4. Peak Detection
+```javascript
+detectPeaks() {
+    const windowSize = 5; // Look at nearby samples
+    const peaks = [];
+    
+    // Minimum threshold to be considered a peak
+    const threshold = this.calculateThreshold();
+    
+    for (let i = windowSize; i < this.fluxHistory.length - windowSize; i++) {
+        const current = this.fluxHistory[i];
+        
+        // Check if current point is above threshold
+        if (current < threshold) continue;
+        
+        // Check if it's a local maximum
+        let isPeak = true;
+        for (let j = i - windowSize; j <= i + windowSize; j++) {
+            if (j === i) continue;
+            if (this.fluxHistory[j] >= current) {
+                isPeak = false;
+                break;
+            }
+        }
+        
+        if (isPeak) peaks.push(i);
+    }
+    
+    return peaks;
+}
+
+calculateThreshold() {
+    // Dynamic threshold based on recent history
+    const recentFlux = this.fluxHistory.slice(-44100); // Last second
+    const mean = recentFlux.reduce((a, b) => a + b, 0) / recentFlux.length;
+    const variance = recentFlux.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / recentFlux.length;
+    
+    return mean + Math.sqrt(variance) * 1.5; // Adjustable sensitivity
+}
+```
+
+### 5. BPM Calculation
+```javascript
+calculateBPM(peaks) {
+    if (peaks.length < 2) return null;
+    
+    // Calculate intervals between peaks
+    const intervals = [];
+    for (let i = 1; i < peaks.length; i++) {
+        intervals.push(peaks[i] - peaks[i - 1]);
+    }
+    
+    // Convert intervals to BPM
+    const sampleRate = 44100; // Standard audio sample rate
+    const bpmCandidates = intervals.map(interval => 
+        (60 * sampleRate) / interval
+    );
+    
+    // Filter out BPM outside our range
+    const validBPMs = bpmCandidates.filter(bpm => 
+        bpm >= this.minBPM && bpm <= this.maxBPM
+    );
+    
+    if (validBPMs.length === 0) return null;
+    
+    // Use median for stability
+    const sortedBPMs = validBPMs.sort((a, b) => a - b);
+    const medianBPM = sortedBPMs[Math.floor(sortedBPMs.length / 2)];
+    
+    // Add to history for smoothing
+    this.bpmHistory.push(medianBPM);
+    if (this.bpmHistory.length > 8) this.bpmHistory.shift();
+    
+    // Return smoothed BPM
+    return this.smoothBPM();
+}
+
+smoothBPM() {
+    // Remove outliers
+    const sortedHistory = [...this.bpmHistory].sort((a, b) => a - b);
+    const validHistory = sortedHistory.slice(1, -1); // Remove highest and lowest
+    
+    // Calculate weighted average favoring recent measurements
+    let weightedSum = 0;
+    let weightSum = 0;
+    
+    validHistory.forEach((bpm, index) => {
+        const weight = index + 1;
+        weightedSum += bpm * weight;
+        weightSum += weight;
+    });
+    
+    return Math.round(weightedSum / weightSum);
+}
+```
+
+## Implementation Notes
+
+1. Sensitivity Tuning:
+- Adjust `threshold` calculation multiplier (currently 1.5) to change beat detection sensitivity
+- Lower values catch more beats but may include false positives
+- Higher values are more conservative but might miss softer beats
+
+2. Frequency Band Weighting:
+- Current weights favor bass frequencies (2.0 for sub-bass, 1.5 for bass)
+- Adjust weights based on music genre (electronic music benefits from current weights)
+
+3. Performance Considerations:
+- Keep history lengths manageable (currently 2 seconds)
+- Process in smaller chunks for real-time analysis
+- Consider using Web Workers for computation if UI becomes sluggish
+
+4. Error Prevention:
+- Implement checks for audio context state
+- Handle cases with insufficient data
+- Validate BPM results before display
+
+## Usage Example
+```javascript
+// Initialize analyzer
+const bpmAnalyzer = new BPMAnalyzer(audioContext, analyserNode);
+
+// Regular update loop
+function analyze() {
+    bpmAnalyzer.updateEnergyHistory();
+    const flux = bpmAnalyzer.calculateFlux();
+    const peaks = bpmAnalyzer.detectPeaks();
+    const bpm = bpmAnalyzer.calculateBPM(peaks);
+    
+    if (bpm) {
+        // Update display with new BPM
+        document.getElementById('bpmDisplay').textContent = bpm;
+    }
+    
+    requestAnimationFrame(analyze);
+}
+
+analyze();
+```
+
+This implementation provides a robust foundation for accurate BPM detection in a club environment, with particular attention to the frequencies and energy patterns typical in electronic dance music.
