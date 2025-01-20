@@ -1,17 +1,23 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
-import { WaveformVisualizer } from './WaveformVisualizer';
-import { BpmAnalyzer } from './BpmAnalyzer';
-import { KeyDetector } from './KeyDetector';
-import { AudioProcessor, calculateBPM, detectMusicalKey } from '@/lib/audioUtils';
+import { WaveformVisualizer } from "./WaveformVisualizer";
+import { BpmAnalyzer } from "./BpmAnalyzer";
+import { KeyDetector } from "./KeyDetector";
+import {
+  AudioProcessor,
+  calculateBPM,
+  detectMusicalKey,
+} from "@/lib/audioUtils";
 import { useToast } from "@/hooks/use-toast";
 
 export function AudioAnalyzer() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [audioProcessor] = useState(() => new AudioProcessor());
-  const [timeData, setTimeData] = useState<Uint8Array>(new Uint8Array(1024).fill(128));
+  const [timeData, setTimeData] = useState<Uint8Array>(
+    new Uint8Array(1024).fill(128),
+  );
   const [bpm, setBpm] = useState(0);
-  const [musicalKey, setMusicalKey] = useState('');
+  const [musicalKey, setMusicalKey] = useState("");
   const { toast } = useToast();
 
   const analyze = useCallback(() => {
@@ -30,7 +36,7 @@ export function AudioAnalyzer() {
         setMusicalKey(detectMusicalKey(freqData));
       }
     } catch (error) {
-      console.error('Analysis error:', error);
+      console.error("Analysis error:", error);
     }
   }, [isAnalyzing, audioProcessor]);
 
@@ -66,14 +72,14 @@ export function AudioAnalyzer() {
         setIsAnalyzing(false);
         setTimeData(new Uint8Array(1024).fill(128));
         setBpm(0);
-        setMusicalKey('');
+        setMusicalKey("");
         toast({
           title: "Analysis Stopped",
           description: "Audio input disconnected",
         });
       }
     } catch (error) {
-      console.error('Toggle error:', error);
+      console.error("Toggle error:", error);
       toast({
         title: "Error",
         description: "Failed to access microphone. Please check permissions.",
@@ -83,29 +89,35 @@ export function AudioAnalyzer() {
   };
 
   return (
-    <div className="w-full min-h-screen flex flex-col p-2 md:p-4 gap-2 md:gap-4">
-      <div className="h-[20vh] rounded-lg overflow-hidden">
+    <div className="flex flex-col gap-4">
+      {/* Waveform Section */}
+      <div className="h-[25vh] md:h-[20vh] rounded-lg overflow-hidden">
         <WaveformVisualizer audioData={timeData} />
       </div>
 
-      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4 min-h-0">
-        <BpmAnalyzer bpm={bpm} />
-        <KeyDetector musicalKey={musicalKey} />
+      {/* Analysis Cards */}
+      <div className="grid grid-cols-1 gap-4">
+        <div className="w-full">
+          <BpmAnalyzer bpm={bpm} />
+        </div>
+        <div className="w-full">
+          <KeyDetector musicalKey={musicalKey} />
+        </div>
       </div>
 
-      <div className="flex flex-col items-center gap-2">
+      {/* Controls Section */}
+      <div className="mt-4">
         <Button
           onClick={toggleAnalysis}
           size="lg"
           variant={isAnalyzing ? "destructive" : "default"}
-          className="w-full max-w-xs"
+          className="w-full h-14 text-lg mb-3"
         >
-          {isAnalyzing ? 'Stop' : 'Start Analysis'}
+          {isAnalyzing ? "Stop" : "Start Analysis"}
         </Button>
-
         <p className="text-sm text-muted-foreground text-center">
-          {isAnalyzing 
-            ? "Analyzing audio input..." 
+          {isAnalyzing
+            ? "Analyzing audio input..."
             : "Click Start to begin analysis"}
         </p>
       </div>
