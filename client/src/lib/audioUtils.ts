@@ -4,6 +4,9 @@ export class AudioProcessor {
   private mediaStream: MediaStream | null = null;
   private smoothingFactor: number = 0.8;
   private previousData: Float32Array | null = null;
+  private bpmHistory: number[] = [];
+  private keyHistory: string[] = [];
+  private lastKeyUpdateTime: number = 0;
 
   async initialize(): Promise<void> {
     try {
@@ -22,7 +25,7 @@ export class AudioProcessor {
       const source = this.audioContext.createMediaStreamSource(stream);
       source.connect(this.analyserNode);
 
-      // Configure analyzer for detailed frequency analysis
+      // Configure analyzer
       this.analyserNode.fftSize = 2048;
       this.analyserNode.smoothingTimeConstant = 0.8;
 
@@ -92,6 +95,8 @@ export class AudioProcessor {
     this.audioContext = null;
     this.analyserNode = null;
     this.previousData = null;
+    this.bpmHistory = [];
+    this.keyHistory = [];
   }
 
   isInitialized(): boolean {
@@ -99,171 +104,83 @@ export class AudioProcessor {
   }
 }
 
-// Energy Flux BPM Detection Implementation
+interface Peak {
+  position: number;
+  value: number;
+}
+
 export const calculateBPM = (function() {
-  const frequencyBands = [
-    { start: 20, end: 60 },    // Sub-bass (kick drums)
-    { start: 60, end: 200 },   // Bass (strong beats)
-    { start: 200, end: 800 },  // Low mids (snares/claps)
-    { start: 800, end: 2000 }  // Mids (percussion)
-  ];
-
-  const energyHistory: number[][] = Array(4).fill([]).map(() => []);
-  const fluxHistory: number[] = [];
   const bpmHistory: number[] = [];
-  const maxHistoryLength = 88200; // About 2 seconds at 44.1kHz
-  const minBPM = 70;
-  const maxBPM = 180;
-  const fftSize = 2048;
-  const sampleRate = 44100;
-
-  function calculateEnergy(frequencyData: Uint8Array, bandStart: number, bandEnd: number): number {
-    const binStart = Math.floor((bandStart * fftSize) / sampleRate);
-    const binEnd = Math.floor((bandEnd * fftSize) / sampleRate);
-
-    let energy = 0;
-    for (let i = binStart; i < binEnd; i++) {
-      energy += Math.pow(frequencyData[i], 2);
-    }
-    return energy;
-  }
-
-  function calculateFlux(frequencyData: Uint8Array): number {
-    let totalFlux = 0;
-
-    frequencyBands.forEach((band, index) => {
-      const energy = calculateEnergy(frequencyData, band.start, band.end);
-
-      // Initialize energy history for this band if empty
-      if (energyHistory[index].length === 0) {
-        energyHistory[index].push(energy);
-        return;
-      }
-
-      const previousEnergy = energyHistory[index][energyHistory[index].length - 1];
-      const flux = Math.max(0, energy - previousEnergy);
-
-      // Weight the bands differently (bass frequencies matter more for beats)
-      const weight = index === 0 ? 2.0 : // Sub-bass
-                    index === 1 ? 1.5 : // Bass
-                    1.0;                // Others
-
-      totalFlux += flux * weight;
-
-      energyHistory[index].push(energy);
-      if (energyHistory[index].length > maxHistoryLength) {
-        energyHistory[index].shift();
-      }
-    });
-
-    fluxHistory.push(totalFlux);
-    if (fluxHistory.length > maxHistoryLength) {
-      fluxHistory.shift();
-    }
-
-    console.log('Total Flux:', totalFlux); // Debug log
-    return totalFlux;
-  }
-
-  function detectPeaks(): number[] {
-    const windowSize = 5;
-    const peaks: number[] = [];
-
-    if (fluxHistory.length < windowSize * 2 + 1) {
-      console.log('Not enough flux history:', fluxHistory.length); // Debug log
-      return peaks;
-    }
-
-    // Calculate dynamic threshold with lower sensitivity
-    const recentFlux = fluxHistory.slice(-Math.min(44100, fluxHistory.length));
-    if (recentFlux.length === 0) return peaks;
-
-    const mean = recentFlux.reduce((a, b) => a + b, 0) / recentFlux.length;
-    const variance = recentFlux.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / recentFlux.length;
-    const threshold = mean + Math.sqrt(variance) * 0.8; // Reduced threshold multiplier
-
-    console.log('Threshold:', threshold, 'Mean:', mean); // Debug log
-
-    for (let i = windowSize; i < fluxHistory.length - windowSize; i++) {
-      const current = fluxHistory[i];
-
-      if (current < threshold) continue;
-
-      // Check if it's a local maximum
-      let isPeak = true;
-      for (let j = i - windowSize; j <= i + windowSize; j++) {
-        if (j === i) continue;
-        if (fluxHistory[j] >= current) {
-          isPeak = false;
-          break;
-        }
-      }
-
-      if (isPeak) peaks.push(i);
-    }
-
-    console.log('Peaks found:', peaks.length); // Debug log
-    return peaks;
-  }
+  const historySize = 20; // Keep last 20 BPM values
+  const minValidBPMCount = 5; // Need at least 5 valid readings
 
   return function(frequencyData: Uint8Array): number {
-    if (!frequencyData.length) {
-      console.log('No frequency data'); // Debug log
-      return 0;
+    // Focus on lower frequencies where beats usually occur (20-200Hz)
+    const lowFreqData = frequencyData.slice(0, Math.floor(frequencyData.length / 4));
+
+    // Calculate dynamic threshold based on average signal strength
+    const average = lowFreqData.reduce((sum, value) => sum + value, 0) / lowFreqData.length;
+    const threshold = average * 1.5; // Threshold at 150% of average
+
+    // Find peaks with minimum distance
+    const minPeakDistance = 8; // Minimum samples between peaks
+    const peaks: Peak[] = [];
+
+    for (let i = 1; i < lowFreqData.length - 1; i++) {
+      if (lowFreqData[i] > threshold &&
+          lowFreqData[i] > lowFreqData[i - 1] &&
+          lowFreqData[i] > lowFreqData[i + 1]) {
+
+        // Check if this is the highest peak in the minimum distance window
+        let isHighestInWindow = true;
+        for (let j = Math.max(0, i - minPeakDistance); j < Math.min(lowFreqData.length, i + minPeakDistance); j++) {
+          if (j !== i && lowFreqData[j] > lowFreqData[i]) {
+            isHighestInWindow = false;
+            break;
+          }
+        }
+
+        if (isHighestInWindow) {
+          peaks.push({ position: i, value: lowFreqData[i] });
+        }
+      }
     }
 
-    calculateFlux(frequencyData);
-    const peaks = detectPeaks();
+    if (peaks.length < 2) return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
 
-    if (peaks.length < 2) {
-      console.log('Not enough peaks detected'); // Debug log
-      return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
-    }
+    // Calculate average interval between peaks
+    let totalInterval = 0;
+    let intervalCount = 0;
 
-    // Calculate intervals between peaks
-    const intervals = [];
     for (let i = 1; i < peaks.length; i++) {
-      intervals.push(peaks[i] - peaks[i - 1]);
+      const interval = peaks[i].position - peaks[i - 1].position;
+      // Filter out intervals that are too short or too long
+      if (interval > 1 && interval < 200) {
+        totalInterval += interval;
+        intervalCount++;
+      }
     }
 
-    // Convert intervals to BPM with adjusted calculation
-    const bpmCandidates = intervals
-      .map(interval => (60 * sampleRate) / (interval * (fftSize / sampleRate)))
-      .filter(bpm => bpm >= minBPM && bpm <= maxBPM);
+    if (intervalCount === 0) return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
 
-    console.log('BPM candidates:', bpmCandidates); // Debug log
+    const averageInterval = totalInterval / intervalCount;
+    const instantBPM = Math.round((60 * 44100) / (2048 * averageInterval));
 
-    if (bpmCandidates.length === 0) {
-      console.log('No valid BPM candidates'); // Debug log
-      return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
+    // Only add valid BPM values to history
+    if (instantBPM >= 40 && instantBPM <= 220) {
+      bpmHistory.push(instantBPM);
+      if (bpmHistory.length > historySize) {
+        bpmHistory.shift();
+      }
     }
 
-    // Use median for stability
-    const sortedBPMs = bpmCandidates.sort((a, b) => a - b);
-    const medianBPM = sortedBPMs[Math.floor(sortedBPMs.length / 2)];
-
-    bpmHistory.push(medianBPM);
-    if (bpmHistory.length > 8) bpmHistory.shift();
-
-    // Return smoothed BPM
-    if (bpmHistory.length < 3) {
-      console.log('Using median BPM:', medianBPM); // Debug log
-      return Math.round(medianBPM);
+    // Return averaged BPM if we have enough history
+    if (bpmHistory.length >= minValidBPMCount) {
+      const sum = bpmHistory.reduce((a, b) => a + b, 0);
+      return Math.round(sum / bpmHistory.length);
     }
 
-    const validHistory = [...bpmHistory].sort((a, b) => a - b).slice(1, -1);
-    let weightedSum = 0;
-    let weightSum = 0;
-
-    validHistory.forEach((bpm, index) => {
-      const weight = index + 1;
-      weightedSum += bpm * weight;
-      weightSum += weight;
-    });
-
-    const finalBPM = Math.round(weightedSum / weightSum);
-    console.log('Final smoothed BPM:', finalBPM); // Debug log
-    return finalBPM;
+    return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
   };
 })();
 
