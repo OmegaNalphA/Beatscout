@@ -114,10 +114,12 @@ export const calculateBPM = (function() {
   const maxHistoryLength = 88200; // About 2 seconds at 44.1kHz
   const minBPM = 70;
   const maxBPM = 180;
+  const fftSize = 2048;
+  const sampleRate = 44100;
 
   function calculateEnergy(frequencyData: Uint8Array, bandStart: number, bandEnd: number): number {
-    const binStart = Math.floor((bandStart * 2048) / 44100);
-    const binEnd = Math.floor((bandEnd * 2048) / 44100);
+    const binStart = Math.floor((bandStart * fftSize) / sampleRate);
+    const binEnd = Math.floor((bandEnd * fftSize) / sampleRate);
 
     let energy = 0;
     for (let i = binStart; i < binEnd; i++) {
@@ -132,17 +134,21 @@ export const calculateBPM = (function() {
     frequencyBands.forEach((band, index) => {
       const energy = calculateEnergy(frequencyData, band.start, band.end);
 
-      if (energyHistory[index].length > 0) {
-        const previousEnergy = energyHistory[index][energyHistory[index].length - 1];
-        const flux = Math.max(0, energy - previousEnergy);
-
-        // Weight the bands differently (bass frequencies matter more for beats)
-        const weight = index === 0 ? 2.0 : // Sub-bass
-                      index === 1 ? 1.5 : // Bass
-                      1.0;                // Others
-
-        totalFlux += flux * weight;
+      // Initialize energy history for this band if empty
+      if (energyHistory[index].length === 0) {
+        energyHistory[index].push(energy);
+        return;
       }
+
+      const previousEnergy = energyHistory[index][energyHistory[index].length - 1];
+      const flux = Math.max(0, energy - previousEnergy);
+
+      // Weight the bands differently (bass frequencies matter more for beats)
+      const weight = index === 0 ? 2.0 : // Sub-bass
+                    index === 1 ? 1.5 : // Bass
+                    1.0;                // Others
+
+      totalFlux += flux * weight;
 
       energyHistory[index].push(energy);
       if (energyHistory[index].length > maxHistoryLength) {
@@ -155,6 +161,7 @@ export const calculateBPM = (function() {
       fluxHistory.shift();
     }
 
+    console.log('Total Flux:', totalFlux); // Debug log
     return totalFlux;
   }
 
@@ -162,11 +169,20 @@ export const calculateBPM = (function() {
     const windowSize = 5;
     const peaks: number[] = [];
 
-    // Calculate dynamic threshold
-    const recentFlux = fluxHistory.slice(-44100); // Last second
+    if (fluxHistory.length < windowSize * 2 + 1) {
+      console.log('Not enough flux history:', fluxHistory.length); // Debug log
+      return peaks;
+    }
+
+    // Calculate dynamic threshold with lower sensitivity
+    const recentFlux = fluxHistory.slice(-Math.min(44100, fluxHistory.length));
+    if (recentFlux.length === 0) return peaks;
+
     const mean = recentFlux.reduce((a, b) => a + b, 0) / recentFlux.length;
     const variance = recentFlux.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / recentFlux.length;
-    const threshold = mean + Math.sqrt(variance) * 1.5;
+    const threshold = mean + Math.sqrt(variance) * 0.8; // Reduced threshold multiplier
+
+    console.log('Threshold:', threshold, 'Mean:', mean); // Debug log
 
     for (let i = windowSize; i < fluxHistory.length - windowSize; i++) {
       const current = fluxHistory[i];
@@ -186,14 +202,21 @@ export const calculateBPM = (function() {
       if (isPeak) peaks.push(i);
     }
 
+    console.log('Peaks found:', peaks.length); // Debug log
     return peaks;
   }
 
   return function(frequencyData: Uint8Array): number {
+    if (!frequencyData.length) {
+      console.log('No frequency data'); // Debug log
+      return 0;
+    }
+
     calculateFlux(frequencyData);
     const peaks = detectPeaks();
 
     if (peaks.length < 2) {
+      console.log('Not enough peaks detected'); // Debug log
       return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
     }
 
@@ -203,12 +226,15 @@ export const calculateBPM = (function() {
       intervals.push(peaks[i] - peaks[i - 1]);
     }
 
-    // Convert intervals to BPM
-    const bpmCandidates = intervals.map(interval => 
-      (60 * 44100) / interval
-    ).filter(bpm => bpm >= minBPM && bpm <= maxBPM);
+    // Convert intervals to BPM with adjusted calculation
+    const bpmCandidates = intervals
+      .map(interval => (60 * sampleRate) / (interval * (fftSize / sampleRate)))
+      .filter(bpm => bpm >= minBPM && bpm <= maxBPM);
+
+    console.log('BPM candidates:', bpmCandidates); // Debug log
 
     if (bpmCandidates.length === 0) {
+      console.log('No valid BPM candidates'); // Debug log
       return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
     }
 
@@ -220,6 +246,11 @@ export const calculateBPM = (function() {
     if (bpmHistory.length > 8) bpmHistory.shift();
 
     // Return smoothed BPM
+    if (bpmHistory.length < 3) {
+      console.log('Using median BPM:', medianBPM); // Debug log
+      return Math.round(medianBPM);
+    }
+
     const validHistory = [...bpmHistory].sort((a, b) => a - b).slice(1, -1);
     let weightedSum = 0;
     let weightSum = 0;
@@ -230,7 +261,9 @@ export const calculateBPM = (function() {
       weightSum += weight;
     });
 
-    return Math.round(weightedSum / weightSum);
+    const finalBPM = Math.round(weightedSum / weightSum);
+    console.log('Final smoothed BPM:', finalBPM); // Debug log
+    return finalBPM;
   };
 })();
 
