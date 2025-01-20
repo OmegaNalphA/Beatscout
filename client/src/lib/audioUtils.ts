@@ -4,6 +4,9 @@ export class AudioProcessor {
   private mediaStream: MediaStream | null = null;
   private smoothingFactor: number = 0.8;
   private previousData: Float32Array | null = null;
+  private bpmHistory: number[] = [];
+  private keyHistory: string[] = [];
+  private lastKeyUpdateTime: number = 0;
 
   async initialize(): Promise<void> {
     try {
@@ -92,6 +95,8 @@ export class AudioProcessor {
     this.audioContext = null;
     this.analyserNode = null;
     this.previousData = null;
+    this.bpmHistory = [];
+    this.keyHistory = [];
   }
 
   isInitialized(): boolean {
@@ -104,69 +109,121 @@ interface Peak {
   value: number;
 }
 
-export const calculateBPM = (frequencyData: Uint8Array): number => {
-  // Focus on lower frequencies where beats usually occur (20-200Hz)
-  const lowFreqData = frequencyData.slice(0, Math.floor(frequencyData.length / 4));
+export const calculateBPM = (function() {
+  const bpmHistory: number[] = [];
+  const historySize = 20; // Keep last 20 BPM values
+  const minValidBPMCount = 5; // Need at least 5 valid readings
 
-  // Calculate dynamic threshold based on average signal strength
-  const average = lowFreqData.reduce((sum, value) => sum + value, 0) / lowFreqData.length;
-  const threshold = average * 1.5; // Threshold at 150% of average
+  return function(frequencyData: Uint8Array): number {
+    // Focus on lower frequencies where beats usually occur (20-200Hz)
+    const lowFreqData = frequencyData.slice(0, Math.floor(frequencyData.length / 4));
 
-  // Find peaks with minimum distance
-  const minPeakDistance = 8; // Minimum samples between peaks
-  const peaks: Peak[] = [];
+    // Calculate dynamic threshold based on average signal strength
+    const average = lowFreqData.reduce((sum, value) => sum + value, 0) / lowFreqData.length;
+    const threshold = average * 1.5; // Threshold at 150% of average
 
-  for (let i = 1; i < lowFreqData.length - 1; i++) {
-    if (lowFreqData[i] > threshold &&
-        lowFreqData[i] > lowFreqData[i - 1] &&
-        lowFreqData[i] > lowFreqData[i + 1]) {
+    // Find peaks with minimum distance
+    const minPeakDistance = 8; // Minimum samples between peaks
+    const peaks: Peak[] = [];
 
-      // Check if this is the highest peak in the minimum distance window
-      let isHighestInWindow = true;
-      for (let j = Math.max(0, i - minPeakDistance); j < Math.min(lowFreqData.length, i + minPeakDistance); j++) {
-        if (j !== i && lowFreqData[j] > lowFreqData[i]) {
-          isHighestInWindow = false;
-          break;
+    for (let i = 1; i < lowFreqData.length - 1; i++) {
+      if (lowFreqData[i] > threshold &&
+          lowFreqData[i] > lowFreqData[i - 1] &&
+          lowFreqData[i] > lowFreqData[i + 1]) {
+
+        // Check if this is the highest peak in the minimum distance window
+        let isHighestInWindow = true;
+        for (let j = Math.max(0, i - minPeakDistance); j < Math.min(lowFreqData.length, i + minPeakDistance); j++) {
+          if (j !== i && lowFreqData[j] > lowFreqData[i]) {
+            isHighestInWindow = false;
+            break;
+          }
+        }
+
+        if (isHighestInWindow) {
+          peaks.push({ position: i, value: lowFreqData[i] });
         }
       }
+    }
 
-      if (isHighestInWindow) {
-        peaks.push({ position: i, value: lowFreqData[i] });
+    if (peaks.length < 2) return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
+
+    // Calculate average interval between peaks
+    let totalInterval = 0;
+    let intervalCount = 0;
+
+    for (let i = 1; i < peaks.length; i++) {
+      const interval = peaks[i].position - peaks[i - 1].position;
+      // Filter out intervals that are too short or too long
+      if (interval > 1 && interval < 200) {
+        totalInterval += interval;
+        intervalCount++;
       }
     }
-  }
 
-  if (peaks.length < 2) return 0;
+    if (intervalCount === 0) return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
 
-  // Calculate average interval between peaks
-  let totalInterval = 0;
-  let intervalCount = 0;
+    const averageInterval = totalInterval / intervalCount;
+    const instantBPM = Math.round((60 * 44100) / (2048 * averageInterval));
 
-  for (let i = 1; i < peaks.length; i++) {
-    const interval = peaks[i].position - peaks[i - 1].position;
-    // Filter out intervals that are too short or too long
-    if (interval > 1 && interval < 200) {
-      totalInterval += interval;
-      intervalCount++;
+    // Only add valid BPM values to history
+    if (instantBPM >= 40 && instantBPM <= 220) {
+      bpmHistory.push(instantBPM);
+      if (bpmHistory.length > historySize) {
+        bpmHistory.shift();
+      }
     }
-  }
 
-  if (intervalCount === 0) return 0;
+    // Return averaged BPM if we have enough history
+    if (bpmHistory.length >= minValidBPMCount) {
+      const sum = bpmHistory.reduce((a, b) => a + b, 0);
+      return Math.round(sum / bpmHistory.length);
+    }
 
-  const averageInterval = totalInterval / intervalCount;
+    return bpmHistory.length > 0 ? bpmHistory[bpmHistory.length - 1] : 0;
+  };
+})();
 
-  // Convert to BPM, considering sampling rate and FFT size
-  // Sample rate (44100) * 60 seconds / (FFT size * average interval between peaks)
-  const bpm = Math.round((60 * 44100) / (2048 * averageInterval));
+export const detectMusicalKey = (function() {
+  const keyHistory: string[] = [];
+  const historySize = 10;
+  const updateInterval = 500; // Update every 500ms
+  let lastUpdateTime = 0;
 
-  // Return BPM within reasonable range (40-220 BPM)
-  return Math.min(Math.max(bpm, 40), 220);
-};
+  return function(frequencyData: Uint8Array): string {
+    const currentTime = Date.now();
 
-export const detectMusicalKey = (frequencyData: Uint8Array): string => {
-  // Simplified key detection using frequency peaks
-  const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
-  const maxIndex = frequencyData.indexOf(Math.max(...Array.from(frequencyData)));
-  const noteIndex = Math.floor(maxIndex % 12);
-  return notes[noteIndex];
-};
+    // Only update key after interval has passed
+    if (currentTime - lastUpdateTime < updateInterval) {
+      return keyHistory.length > 0 ? keyHistory[keyHistory.length - 1] : '';
+    }
+
+    // Simplified key detection using frequency peaks
+    const notes = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+    const maxIndex = frequencyData.indexOf(Math.max(...Array.from(frequencyData)));
+    const noteIndex = Math.floor(maxIndex % 12);
+    const currentKey = notes[noteIndex];
+
+    keyHistory.push(currentKey);
+    if (keyHistory.length > historySize) {
+      keyHistory.shift();
+    }
+
+    // Return most common key in history
+    const keyCounts = new Map<string, number>();
+    let maxCount = 0;
+    let dominantKey = currentKey;
+
+    keyHistory.forEach(key => {
+      const count = (keyCounts.get(key) || 0) + 1;
+      keyCounts.set(key, count);
+      if (count > maxCount) {
+        maxCount = count;
+        dominantKey = key;
+      }
+    });
+
+    lastUpdateTime = currentTime;
+    return dominantKey;
+  };
+})();
