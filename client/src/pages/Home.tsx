@@ -8,7 +8,7 @@ export default function Home() {
           <h1 className="text-4xl font-bold tracking-tighter mb-2 bg-clip-text text-transparent bg-gradient-to-r from-primary to-primary/60">
             BeatScout
           </h1>
-          <p className="text-muted-foreground">Real-time Music Analysis Tool</p>
+          <p className="text-muted-foreground">real-time music analysis tool</p>
         </header>
 
         <main className="flex-1">

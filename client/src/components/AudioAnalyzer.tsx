@@ -4,14 +4,22 @@ import { WaveformVisualizer } from "./WaveformVisualizer";
 import { SpectrumAnalyzer } from "./SpectrumAnalyzer";
 import { BpmAnalyzer } from "./BpmAnalyzer";
 import { KeyDetector } from "./KeyDetector";
-import { AudioProcessor, calculateBPM, detectMusicalKey } from "@/lib/audioUtils";
+import {
+  AudioProcessor,
+  calculateBPM,
+  detectMusicalKey,
+} from "@/lib/audioUtils";
 import { useToast } from "@/hooks/use-toast";
 
 export function AudioAnalyzer() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [audioProcessor] = useState(() => new AudioProcessor());
-  const [timeData, setTimeData] = useState<Uint8Array>(new Uint8Array(1024).fill(128));
-  const [freqData, setFreqData] = useState<Uint8Array>(new Uint8Array(1024).fill(0));
+  const [timeData, setTimeData] = useState<Uint8Array>(
+    new Uint8Array(1024).fill(128),
+  );
+  const [freqData, setFreqData] = useState<Uint8Array>(
+    new Uint8Array(1024).fill(0),
+  );
   const [bpm, setBpm] = useState(0);
   const [musicalKey, setMusicalKey] = useState("");
   const { toast } = useToast();
@@ -88,11 +96,11 @@ export function AudioAnalyzer() {
   return (
     <div className="flex flex-col gap-4">
       {/* Visualization Section */}
-      <div className="grid grid-cols-1 gap-4">
-        <div className="h-[20vh] rounded-lg overflow-hidden">
+      <div className="grid grid-cols-1">
+        <div className="h-[8vh] rounded-lg overflow-hidden">
           <WaveformVisualizer audioData={timeData} />
         </div>
-        <div className="h-[20vh] rounded-lg overflow-hidden">
+        <div className="h-[18vh] rounded-lg overflow-hidden">
           <SpectrumAnalyzer frequencyData={freqData} />
         </div>
       </div>
@@ -118,7 +126,9 @@ export function AudioAnalyzer() {
           {isAnalyzing ? "Stop" : "Start Analysis"}
         </Button>
         <p className="text-sm text-muted-foreground text-center">
-          {isAnalyzing ? "Analyzing audio input..." : "Click Start to begin analysis"}
+          {isAnalyzing
+            ? "Analyzing audio input..."
+            : "Click Start to begin analysis"}
         </p>
       </div>
     </div>
