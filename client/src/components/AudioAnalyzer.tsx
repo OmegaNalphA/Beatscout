@@ -9,21 +9,30 @@ import { useToast } from "@/hooks/use-toast";
 export function AudioAnalyzer() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [audioProcessor] = useState(() => new AudioProcessor());
-  const [timeData, setTimeData] = useState<Uint8Array>(new Uint8Array());
+  const [timeData, setTimeData] = useState<Uint8Array>(new Uint8Array(1024).fill(128));
   const [bpm, setBpm] = useState(0);
   const [musicalKey, setMusicalKey] = useState('');
   const { toast } = useToast();
 
   const analyze = useCallback(() => {
-    if (!audioProcessor.isInitialized()) return;
+    if (!isAnalyzing || !audioProcessor.isInitialized()) return;
 
-    const timeData = audioProcessor.getTimeData();
-    const freqData = audioProcessor.getFrequencyData();
-    
-    setTimeData(timeData);
-    setBpm(calculateBPM(freqData));
-    setMusicalKey(detectMusicalKey(freqData));
-  }, [audioProcessor]);
+    try {
+      const timeData = audioProcessor.getTimeData();
+      const freqData = audioProcessor.getFrequencyData();
+
+      if (timeData.length > 0) {
+        setTimeData(timeData);
+      }
+
+      if (freqData.length > 0) {
+        setBpm(calculateBPM(freqData));
+        setMusicalKey(detectMusicalKey(freqData));
+      }
+    } catch (error) {
+      console.error('Analysis error:', error);
+    }
+  }, [isAnalyzing, audioProcessor]);
 
   useEffect(() => {
     let animationFrame: number;
@@ -55,7 +64,7 @@ export function AudioAnalyzer() {
       } else {
         audioProcessor.cleanup();
         setIsAnalyzing(false);
-        setTimeData(new Uint8Array());
+        setTimeData(new Uint8Array(1024).fill(128));
         setBpm(0);
         setMusicalKey('');
         toast({
@@ -64,6 +73,7 @@ export function AudioAnalyzer() {
         });
       }
     } catch (error) {
+      console.error('Toggle error:', error);
       toast({
         title: "Error",
         description: "Failed to access microphone. Please check permissions.",
@@ -92,7 +102,7 @@ export function AudioAnalyzer() {
         >
           {isAnalyzing ? 'Stop' : 'Start Analysis'}
         </Button>
-        
+
         <p className="text-sm text-muted-foreground text-center">
           {isAnalyzing 
             ? "Analyzing audio input..." 
