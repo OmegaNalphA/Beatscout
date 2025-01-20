@@ -83,17 +83,17 @@ export function AudioAnalyzer() {
   };
 
   return (
-    <div className="w-full h-[100vh] max-w-4xl mx-auto flex flex-col justify-between p-4">
-      <div className="h-[25vh] rounded-lg overflow-hidden">
+    <div className="w-full min-h-screen flex flex-col p-2 md:p-4 gap-2 md:gap-4">
+      <div className="h-[20vh] rounded-lg overflow-hidden">
         <WaveformVisualizer audioData={timeData} />
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 h-[35vh]">
+      <div className="flex-1 grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4 min-h-0">
         <BpmAnalyzer bpm={bpm} />
         <KeyDetector musicalKey={musicalKey} />
       </div>
 
-      <div className="flex flex-col items-center gap-2 pb-4">
+      <div className="flex flex-col items-center gap-2">
         <Button
           onClick={toggleAnalysis}
           size="lg"
