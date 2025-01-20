@@ -51,13 +51,13 @@ export class AudioProcessor {
     const currentData = new Float32Array(length);
     for (let i = 0; i < length; i++) {
       // Apply exponential smoothing
-      currentData[i] = this.smoothingFactor * (data[i]) + 
+      currentData[i] = this.smoothingFactor * (data[i]) +
                       (1 - this.smoothingFactor) * this.previousData[i];
 
       // Additional pass to smooth neighboring samples
       if (i > 0 && i < length - 1) {
-        currentData[i] = 0.25 * currentData[i-1] + 
-                        0.5 * currentData[i] + 
+        currentData[i] = 0.25 * currentData[i-1] +
+                        0.5 * currentData[i] +
                         0.25 * data[i+1];
       }
     }
@@ -99,27 +99,68 @@ export class AudioProcessor {
   }
 }
 
-export const calculateBPM = (frequencyData: Uint8Array): number => {
-  // Basic BPM detection using peak analysis
-  const peaks = [];
-  let threshold = 200;
+interface Peak {
+  position: number;
+  value: number;
+}
 
-  for (let i = 0; i < frequencyData.length; i++) {
-    if (frequencyData[i] > threshold) {
-      peaks.push(i);
+export const calculateBPM = (frequencyData: Uint8Array): number => {
+  // Focus on lower frequencies where beats usually occur (20-200Hz)
+  const lowFreqData = frequencyData.slice(0, Math.floor(frequencyData.length / 4));
+
+  // Calculate dynamic threshold based on average signal strength
+  const average = lowFreqData.reduce((sum, value) => sum + value, 0) / lowFreqData.length;
+  const threshold = average * 1.5; // Threshold at 150% of average
+
+  // Find peaks with minimum distance
+  const minPeakDistance = 8; // Minimum samples between peaks
+  const peaks: Peak[] = [];
+
+  for (let i = 1; i < lowFreqData.length - 1; i++) {
+    if (lowFreqData[i] > threshold &&
+        lowFreqData[i] > lowFreqData[i - 1] &&
+        lowFreqData[i] > lowFreqData[i + 1]) {
+
+      // Check if this is the highest peak in the minimum distance window
+      let isHighestInWindow = true;
+      for (let j = Math.max(0, i - minPeakDistance); j < Math.min(lowFreqData.length, i + minPeakDistance); j++) {
+        if (j !== i && lowFreqData[j] > lowFreqData[i]) {
+          isHighestInWindow = false;
+          break;
+        }
+      }
+
+      if (isHighestInWindow) {
+        peaks.push({ position: i, value: lowFreqData[i] });
+      }
     }
   }
 
   if (peaks.length < 2) return 0;
 
-  const averageInterval = peaks.reduce((acc, val, idx, arr) => {
-    if (idx === 0) return acc;
-    return acc + (val - arr[idx - 1]);
-  }, 0) / (peaks.length - 1);
+  // Calculate average interval between peaks
+  let totalInterval = 0;
+  let intervalCount = 0;
 
-  // Convert to BPM
-  const bpm = Math.round((60 * 44100) / (averageInterval * 2048));
-  return Math.min(Math.max(bpm, 60), 200); // Clamp between 60-200 BPM
+  for (let i = 1; i < peaks.length; i++) {
+    const interval = peaks[i].position - peaks[i - 1].position;
+    // Filter out intervals that are too short or too long
+    if (interval > 1 && interval < 200) {
+      totalInterval += interval;
+      intervalCount++;
+    }
+  }
+
+  if (intervalCount === 0) return 0;
+
+  const averageInterval = totalInterval / intervalCount;
+
+  // Convert to BPM, considering sampling rate and FFT size
+  // Sample rate (44100) * 60 seconds / (FFT size * average interval between peaks)
+  const bpm = Math.round((60 * 44100) / (2048 * averageInterval));
+
+  // Return BPM within reasonable range (40-220 BPM)
+  return Math.min(Math.max(bpm, 40), 220);
 };
 
 export const detectMusicalKey = (frequencyData: Uint8Array): string => {
