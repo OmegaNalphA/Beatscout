@@ -29,9 +29,9 @@ export function WaveformVisualizer({ audioData }: WaveformVisualizerProps) {
 
       let x = 0;
       for (let i = 0; i < bufferLength; i++) {
-        // Increase amplitude by adjusting the scaling
-        const v = (audioData[i] / 128.0) * 1.5; // Increased scaling factor from 1.0 to 1.5
-        const y = height / 2 + (v - 1) * (height / 2); // Center at height/2 and scale amplitude
+        // Normalize and scale the audio data
+        const v = (audioData[i] / 128.0) * 1.5; // Scale factor of 1.5 for more pronounced waves
+        const y = height / 2 + ((v - 1) * height) / 3; // Center at height/2 and scale the amplitude
 
         if (i === 0) {
           ctx.moveTo(x, y);
@@ -42,7 +42,6 @@ export function WaveformVisualizer({ audioData }: WaveformVisualizerProps) {
         x += sliceWidth;
       }
 
-      ctx.lineTo(width, height / 2);
       ctx.stroke();
     };
 
